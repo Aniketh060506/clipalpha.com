@@ -1,5 +1,4 @@
-# 🔐 ClipAlpha (formerly Pastit)
-
+# 🔐 ClipAlpha
 > **A zero-knowledge encrypted clipboard and file-sharing platform.**
 
 ![ClipAlpha Cover](frontend/clipalpha_favicon_1775054038470.png)
