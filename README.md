@@ -1,8 +1,17 @@
 # 🔐 ClipAlpha
 > **A zero-knowledge encrypted clipboard and file-sharing platform.**
+> Live: https://clipalpha.com
 
 ![ClipAlpha Cover](frontend/clipalpha_favicon_1775054038470.png)
 
+## Why ClipAlpha?
+
+Sharing sensitive data through WhatsApp, email, or Slack exposes it in plaintext.
+
+ClipAlpha solves this by:
+- Encrypting data in the browser before sending
+- Ensuring the server never sees plaintext
+- Allowing self-destructing and password-protected links
 ClipAlpha is a highly secure, ephemeral secret-sharing platform hosted 100% on AWS serverless infrastructure. 
 
 The core principle: **The server physically cannot read what users share.** 
