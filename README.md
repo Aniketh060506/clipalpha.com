@@ -2,7 +2,7 @@
 
 > **A zero-knowledge encrypted clipboard and file-sharing platform.**
 
-![ClipAlpha Cover](cover.png) *(You can add a cover image here)*
+![ClipAlpha Cover](frontend/clipalpha_favicon_1775054038470.png)
 
 ClipAlpha is a highly secure, ephemeral secret-sharing platform hosted 100% on AWS serverless infrastructure. 
 
