@@ -1,0 +1,235 @@
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+@layer base {
+  html {
+    transition: background-color 0.5s ease;
+  }
+  
+  :root {
+    --background: 210 16% 93%;
+    --foreground: 220 25% 14%;
+
+    --card: 210 20% 98%;
+    --card-foreground: 220 25% 14%;
+
+    --popover: 210 20% 98%;
+    --popover-foreground: 220 25% 14%;
+
+    --primary: 212 72% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 190 60% 94%;
+    --secondary-foreground: 220 25% 14%;
+
+    --muted: 210 15% 88%;
+    --muted-foreground: 220 12% 48%;
+
+    --accent: 4 90% 68%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 160 55% 46%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 210 30% 90%;
+    --input: 210 30% 90%;
+    --ring: 212 72% 55%;
+
+    --radius: 1.5rem;
+
+    /* Multi-color section backgrounds */
+    --section-sky: 200 80% 96%;
+    --section-lavender: 240 50% 96%;
+    --section-mint: 160 40% 95%;
+    --section-peach: 20 80% 96%;
+    --section-rose: 340 50% 96%;
+
+    --font-heading: 'Crimson Pro', Georgia, serif;
+    --font-body: 'Inter', -apple-system, sans-serif;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 4.7%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 4.7%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 212 72% 59%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 13.3%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 11%;
+    --muted-foreground: 220 10% 64%;
+    --accent: 4 90% 68%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 0 0% 13.3%;
+    --input: 0 0% 13.3%;
+    --ring: 212 72% 59%;
+    --section-sky: 0 0% 6%;
+    --section-lavender: 0 0% 6%;
+    --section-mint: 0 0% 6%;
+    --section-peach: 0 0% 6%;
+    --section-rose: 0 0% 6%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+
+  /* Custom sleek scrollbar for entire app */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+  }
+  
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(148, 163, 184, 0.3);
+    border-radius: 10px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(148, 163, 184, 0.5);
+  }
+}
+
+@layer utilities {
+  .hide-scrollbars {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hide-scrollbars::-webkit-scrollbar {
+    display: none;
+  }
+  .font-heading {
+    font-family: var(--font-heading);
+  }
+  .font-body {
+    font-family: var(--font-body);
+  }
+  .bg-section-sky {
+    background-color: hsl(var(--section-sky));
+  }
+  .bg-section-lavender {
+    background-color: hsl(var(--section-lavender));
+  }
+  .bg-section-mint {
+    background-color: hsl(var(--section-mint));
+  }
+  .bg-section-peach {
+    background-color: hsl(var(--section-peach));
+  }
+  .bg-section-rose {
+    background-color: hsl(var(--section-rose));
+  }
+  
+  /* DRAMATIC CASCADING THEME TOGGLE (PHYSICAL KEYFRAME POP) */
+  .theme-cascade-1 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+  .theme-cascade-2 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+  .theme-cascade-3 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+  .theme-cascade-4 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+  .theme-cascade-5 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+  .theme-cascade-6 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+  .theme-cascade-7 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+  .theme-cascade-8 { transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important; }
+
+  /* Trigger forward ripple when going Dark */
+  html.dark .theme-cascade-1 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0ms 1 forwards; }
+  html.dark .theme-cascade-2 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 75ms 1 forwards; }
+  html.dark .theme-cascade-3 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 150ms 1 forwards; }
+  html.dark .theme-cascade-4 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 225ms 1 forwards; }
+  html.dark .theme-cascade-5 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 300ms 1 forwards; }
+  html.dark .theme-cascade-6 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 375ms 1 forwards; }
+  html.dark .theme-cascade-7 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 450ms 1 forwards; }
+  html.dark .theme-cascade-8 { animation: theme-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 525ms 1 forwards; }
+
+  /* Trigger backward ripple when going Light */
+  html:not(.dark) .theme-cascade-1 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0ms 1 forwards; }
+  html:not(.dark) .theme-cascade-2 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 75ms 1 forwards; }
+  html:not(.dark) .theme-cascade-3 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 150ms 1 forwards; }
+  html:not(.dark) .theme-cascade-4 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 225ms 1 forwards; }
+  html:not(.dark) .theme-cascade-5 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 300ms 1 forwards; }
+  html:not(.dark) .theme-cascade-6 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 375ms 1 forwards; }
+  html:not(.dark) .theme-cascade-7 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 450ms 1 forwards; }
+  html:not(.dark) .theme-cascade-8 { animation: theme-pop-light 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 525ms 1 forwards; }
+}
+
+@keyframes theme-pop {
+  0% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.02); filter: brightness(1.2); box-shadow: 0 0 25px rgba(255,255,255,0.1); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+@keyframes theme-pop-light {
+  0% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.02); filter: brightness(0.9); box-shadow: 0 0 25px rgba(0,0,0,0.1); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+/* ── File row loading shimmer ── */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+/* ── Custom scrollbar for panels ── */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+}

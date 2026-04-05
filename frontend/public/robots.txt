@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+
+# Don't index individual clip view pages (private content)
+Disallow: /view/
+
+Sitemap: https://clipalpha.com/sitemap.xml

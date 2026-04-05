@@ -1,0 +1,1235 @@
+=== AWS GUIDE ===
+pastit.site  
+Complete AWS Architecture & Implementation Guide  
+How every service works, how they talk to each other, and why  
+React Frontend  
+S3 + CloudFront  API Gateway  
+Lambda Functions  DynamoDB  
+S3 Content Store  Route 53 + ACM  
+WAF Security  
+  
+1. The Big Picture  
+pastit.site is a zero -knowledge encrypted clipboard. When someone shares content, their 
+browser encrypts it before anything leaves their device. Your AWS infrastructure only ever 
+stores and serves encrypted noise — it has no ability to read what users shar e. 
+ 
+The entire backend is serverless. There are no EC2 instances, no servers to patch, no 
+containers to manage. Everything runs on demand and costs near zero until you have real 
+traffic.  
+ 
+Two URLs, Two Jobs  
+• pastit.site — the landing page, served statically from S3 via CloudFront  
+• pastit.site/someslug — the app itself, same React build, same CDN delivery  
+ 
+A user who visits pastit.site/anything gets the React app. React then reads the slug from the 
+URL, checks availability, and shows either the creation workspace (slug is free) or the 
+view/password screen (slug has content).  
+ 
+  
+2. GoDaddy to Route 53 — Domain Migration  
+Your domain is currently at GoDaddy. You need to move DNS management to AWS Route 53 
+so all your AWS records stay in one place. This is a nameserver switch, not a domain transfer 
+— the domain stays registered at GoDaddy.  
+ 
+Step -by-Step Migration  
+1 Log into AWS Console. Go to Route 53 > Hosted Zones > Create Hosted Zone. 
+Enter your domain name (pastit.site) and choose Public Hosted Zone. Click Create.  
+2 AWS gives you 4 nameserver values like ns -123.awsdns -45.com. Copy all four of 
+them.  
+3 Log into GoDaddy. Go to My Domains > pastit.site > DNS > Manage DNS. Scroll 
+down to Nameservers. Click Change.  
+4 Select Custom nameservers. Delete GoDaddy's default ones. Paste in all 4 AWS 
+nameservers. Save.  
+5 DNS propagation takes 24 -48 hours worldwide. During this time some users hit old 
+GoDaddy DNS, others hit Route 53. Both work fine — GoDaddy records still exist, 
+Route 53 is just taking over gradually.  
+6 Once propagated, ALL DNS for pastit.site is controlled from Route 53. You add 
+records here from now on.  
+ 
+What Records Route 53 Will Hold  
+Record Type  Purpose  
+A / ALIAS  Points pastit.site to your CloudFront distribution  
+CNAME  Points www.pastit.site to CloudFront (if needed)  
+CNAME  ACM certificate validation records (AWS adds these automatically)  
+MX If you ever add email, mail routing goes here  
+ 
+After migration your GoDaddy account keeps the domain registration (renewal, ownership) but 
+GoDaddy DNS is bypassed entirely. Route 53 charges $0.50/month per hosted zone plus tiny 
+per-query fees — basically free.  
+ 
+  
+3. ACM — SSL Certificate  
+AWS Certificate Manager gives you a free HTTPS certificate for pastit.site and *.pastit.site. It 
+auto-renews. You never touch it again after setup.  
+ 
+Property  Detail  
+What it does  Issues and manages TLS/SSL certificates for your domain  
+Cost  Free for certificates used with AWS services  
+Region  Must be created in us -east-1 (required for CloudFront)  
+Renewal  Fully automatic — AWS renews before expiry  
+Validation  DNS validation via CNAME record in Route 53  
+ 
+How It Works  
+You request a certificate for pastit.site and *.pastit.site. AWS gives you a CNAME record to add 
+to Route 53. Once you add it (takes 30 seconds), AWS verifies you own the domain and issues 
+the cert within minutes. CloudFront then uses this cert to serve HT TPS to every user on the 
+planet.  
+ 
+The CNAME stays in Route 53 forever. AWS checks it periodically to renew the certificate 
+automatically — you never have to touch it again.  
+ 
+  
+4. CloudFront — Global CDN  
+CloudFront is the front door of your entire application. Every single request to pastit.site hits 
+CloudFront first. It has 400+ edge locations worldwide, so a user in Tokyo gets served from 
+Tokyo, not from your S3 bucket in us -east-1. 
+ 
+Property  Detail  
+What it does  Global content delivery, HTTPS termination, caching, routing  
+Edge locations  400+ cities worldwide  
+HTTPS  Uses your ACM certificate — free, auto -renewing  
+Cost  First 1TB/month free, then ~$0.0085/GB. Practically free at early stage.  
+Cache TTL  Static assets cached at edge for 1 year. API calls bypass cache.  
+ 
+Two Origins in One Distribution  
+Your CloudFront distribution has two origins configured:  
+ 
+Origin 1 — S3 static site bucket. Serves your React app files (index.html, main.js, CSS). When 
+someone hits pastit.site or pastit.site/anything, CloudFront checks if the path matches a static 
+file. If yes, it returns it from the nearest edge cache.  
+ 
+Origin 2 — API Gateway. All requests to /api/* get forwarded to API Gateway, which routes 
+them to your Lambda functions. CloudFront passes these through without caching.  
+ 
+The SPA Routing Trick  
+React is a Single Page Application. There is only one real HTML file — index.html. When 
+someone visits pastit.site/myslug directly, CloudFront would normally return a 404 because 
+there is no file called myslug. You configure a custom error response: any 40 3 or 404 from S3 
+gets rewritten to return index.html with a 200 status. React then reads the URL and renders the 
+right view.  
+ 
+WAF Sits Here  
+WAF (Web Application Firewall) attaches directly to CloudFront. Every request passes through 
+WAF before CloudFront even processes it. WAF blocks known malicious IPs, SQL injection 
+patterns, XSS attempts, and rate -limits aggressive callers. You never have t o do this yourself.  
+ 
+  
+5. S3 — React App Hosting  
+S3 is object storage. You store your compiled React build here (index.html, main.js, CSS files, 
+images). S3 serves these files when CloudFront requests them. Users never talk to S3 directly 
+— they always go through CloudFront.  
+ 
+Property  Detail  
+What it stores  React build output: index.html, JS chunks, CSS, public assets  
+Access  Private — only CloudFront can read it (Origin Access Control)  
+Cost  First 5GB free, then $0.023/GB. Negligible.  
+Deployment  aws s3 sync ./build s3://your -bucket -name --delete  
+Invalidation  After deploy, run CloudFront invalidation to clear cached old files  
+ 
+Deployment Flow  
+Every time you update the frontend: run npm run build locally, sync the build folder to S3, then 
+invalidate CloudFront cache. Takes about 60 seconds total. Users get the new version 
+immediately after invalidation.  
+ 
+The bucket is configured with static website hosting disabled — CloudFront handles all delivery. 
+The bucket itself blocks all public access. CloudFront uses Origin Access Control (OAC) to 
+authenticate its requests to S3.  
+ 
+  
+6. API Gateway — The Router  
+API Gateway is the entry point for all backend requests. Your React frontend sends HTTP calls 
+to specific paths, and API Gateway maps each path to the right Lambda function. It handles 
+authentication headers, CORS, request validation, and throttling.  
+ 
+Property  Detail  
+Type  HTTP API (simpler, cheaper than REST API)  
+What it does  Routes HTTP requests to Lambda functions  
+Cost  $1.00 per million requests — effectively free at early stage  
+CORS  Configured here to allow your React frontend's origin  
+Throttling  Default 10,000 requests/second, burstable  
+ 
+Route Map — Every Endpoint  
+Route  Lambda  
+POST /api/clip  create — encrypts metadata and stores clip  
+GET /api/clip/{slug}  view — fetches clip metadata (no content yet)  
+POST 
+/api/clip/{slug}/unlock  view — verifies password, returns encrypted blob  
+DELETE 
+/api/clip/{slug}  delete — removes clip immediately  
+GET /api/slug -
+check/{slug}  check — returns available/taken status  
+ 
+API Gateway adds the stage prefix automatically. You configure it once and forget it. Every 
+Lambda gets invoked with the full request context — method, path, headers, body, query 
+params.  
+ 
+  
+7. Lambda — The Brain  
+Lambda runs your business logic. A Lambda function is just code that runs when called. It starts 
+in milliseconds, runs your function, and stops. You pay only for the milliseconds it runs. There 
+are no servers, no idle cost, no capacity planning.  
+ 
+Property  Detail  
+Runtime  Node.js 20 (or Python 3.12 — your choice)  
+Memory  256MB per function — sufficient for all clip operations  
+Timeout  10 seconds (clip operations complete in under 1 second)  
+Cold start  ~200ms on first call after idle — invisible to users  
+Cost  First 1 million calls/month free. Then $0.20 per million. Practically zero.  
+ 
+Lambda: create  
+Called when a user hits Create & Share. Receives: slug, encrypted blob, password hash, expiry 
+setting, max views, burn -after-read flag.  
+ 
+What it does: Checks DynamoDB that the slug is not already taken. Writes the encrypted blob to 
+S3 at the key clips/{slug}. Writes metadata to DynamoDB — slug as partition key, expiry 
+timestamp, view count starting at 0, password hash, all flags. Returns th e shareable URL to the 
+frontend.  
+ 
+What it never does: reads the encrypted blob, knows the password, or stores any plaintext 
+content.  
+ 
+Lambda: view (metadata)  
+Called the moment a recipient opens the link. Receives: slug only.  
+ 
+What it does: Reads DynamoDB for this slug. Returns metadata only — content type, expiry 
+time, whether a password is required, current view count, whether it is locked. Does NOT return 
+the encrypted blob yet. The frontend uses this to decide whether to sho w a password prompt or 
+go straight to content.  
+ 
+Lambda: view (unlock)  
+Called when the recipient submits the password. Receives: slug, password hash.  
+ 
+What it does: Reads wrong -attempt count from DynamoDB. If 5 or more, returns locked error 
+immediately. If under 5, compares the submitted hash against the stored hash. If wrong, 
+increments attempt counter atomically and returns wrong -password error with attempts 
+remaining. If correct, fetches the encrypted blob from S3 and returns it. Also increments view 
+count. If burn -after-read is set, deletes both the DynamoDB record and S3 ob ject immediately.  
+ 
+Lambda: cleanup  
+Not triggered by users. Triggered by EventBridge on a schedule (every hour).  
+ 
+What it does: Scans for S3 objects whose corresponding DynamoDB record has expired or 
+been deleted. Deletes those S3 objects. This catches any S3 blobs left behind when 
+DynamoDB TTL deleted the metadata record. DynamoDB TTL handles its own cleanup natively  
+— Lambda only needs to clean S3.  
+ 
+Lambda: slug -check  
+Called in real time as the user types a slug. Receives: slug string.  
+ 
+What it does: Simple DynamoDB read. If the slug exists and has not expired, returns taken. 
+Otherwise returns available. Response is under 50ms — fast enough for real -time green/red dot 
+feedback while typing.  
+ 
+  
+8. DynamoDB — Metadata Store  
+DynamoDB is a fully managed NoSQL database. It stores all clip metadata. It never stores 
+content — content lives in S3. DynamoDB scales automatically, has single -digit millisecond 
+reads, and costs practically nothing at your scale.  
+ 
+Property  Detail  
+Type  NoSQL key -value / document store  
+Partition key  slug (string) — every clip lookup goes by slug  
+Billing mode  On-demand (pay per request, no capacity planning)  
+Cost  First 25GB storage free. Reads/writes fractions of a cent per million.  
+TTL Built-in expiry — set a Unix timestamp, DynamoDB auto -deletes the 
+record  
+ 
+What Each Record Contains  
+Field  Description  
+slug Partition key. e.g. myslug  
+passwordHash  Bcrypt hash of the password. Never the password itself.  
+contentType  text or file  
+expiresAt  Unix timestamp. DynamoDB TTL uses this to auto -delete.  
+viewCount  Number of successful views. Incremented atomically.  
+maxViews  Optional cap. Lambda checks this and deletes if exceeded.  
+wrongAttempts  Failed password count. Locked at 5.  
+burnAfterRead  Boolean. If true, Lambda deletes record + S3 object after first view.  
+s3Key  Key of the encrypted blob in S3 (usually clips/slug)  
+integrityHash  SHA-256 of the encrypted blob for tamper detection  
+createdAt  ISO timestamp of creation  
+ 
+TTL — Auto -Expiry  
+DynamoDB's TTL feature watches the expiresAt field. When the current time passes that 
+timestamp, DynamoDB deletes the record automatically. No Lambda, no cron job, no cost. This 
+is how 1 -day, 7 -day, and 30 -day clips self -destruct — you just set the right t imestamp at 
+creation and DynamoDB handles the rest.  
+ 
+Atomic Operations — Why Wrong Attempts Cannot Be Gamed  
+When a wrong password is submitted, Lambda uses a DynamoDB conditional update: 
+increment wrongAttempts only if the current value is less than 5. This is a single atomic 
+database operation. Two simultaneous wrong guesses cannot both read 4, both add 1, and both 
+write 5 — one will fail the condition check. This prevents race -condition brute force attacks.  
+ 
+  
+9. S3 — Encrypted Content Store  
+A second S3 bucket stores the actual clip content — but only as encrypted blobs. Lambda 
+functions write to and read from this bucket. The React frontend never talks to this bucket 
+directly.  
+ 
+Property  Detail  
+What it stores  AES-256-GCM encrypted blobs at key: clips/{slug}  
+Access  Private — only Lambda IAM role can read/write  
+Max object size  50MB (your file upload limit)  
+Cost  $0.023/GB/month. A 1KB text clip costs $0.000000023/month.  
+Lifecycle rule  Objects older than 35 days auto -deleted as a final safety net  
+Encryption at rest  S3 server -side encryption (AES -256) — double -encrypted  
+ 
+Write Path (Create)  
+Browser encrypts content → sends encrypted blob to API Gateway → Lambda create receives 
+blob → Lambda calls S3 PutObject at clips/{slug} → S3 stores it → Lambda writes the S3 key to 
+DynamoDB record → returns success to frontend.  
+ 
+Read Path (View)  
+Recipient submits correct password → Lambda view calls S3 GetObject at clips/{slug} → S3 
+returns encrypted blob → Lambda forwards blob to frontend → browser decrypts locally using 
+the user's password → plaintext appears on screen. The server sees a blob go  out. It cannot 
+read it.  
+ 
+  
+10. EventBridge — Scheduled Cleanup  
+EventBridge is AWS's event bus and scheduler. You configure a rule that fires the cleanup 
+Lambda every hour. That is its entire job for pastit.site.  
+ 
+Property  Detail  
+What it does  Triggers Lambda cleanup on a schedule  
+Schedule  rate(1 hour) — every 60 minutes  
+Cost  First 14 million events/month free. This fires 720 times/month. Free.  
+Why needed  DynamoDB TTL deletes metadata records. S3 blobs are orphaned. 
+EventBridge fires Lambda to clean them up.  
+ 
+The three -layer cleanup system: DynamoDB TTL deletes the record. EventBridge + Lambda 
+cleanup deletes the orphaned S3 object. S3 lifecycle rule at 35 days deletes anything that 
+somehow slipped through both. Belt, suspenders, and a safety pin.  
+ 
+  
+11. WAF — Web Application Firewall  
+WAF sits in front of CloudFront. Every request passes through WAF before anything else. It 
+blocks bad traffic before it ever reaches your application.  
+ 
+Property  Detail  
+What it blocks  Known malicious IPs, SQL injection, XSS, bad bots  
+Rate limiting  IP-based — blocks IPs sending too many requests too fast  
+Managed rules  AWS maintains the rule sets — you subscribe, they update  
+Cost  $5/month base + $1 per million requests. This is your biggest fixed cost.  
+Logging  Can log every blocked request to CloudWatch for analysis  
+ 
+WAF is configured with the AWS Managed Rules Common Rule Set — this covers OWASP Top 
+10 automatically. For your use case, the most important protection is rate limiting on the 
+/api/clip/{slug}/unlock endpoint — this is the password -guessing endpoint. Even though 
+DynamoDB locks after 5 attempts, WAF adds a network layer that blocks IPs making too many 
+unlock attempts across different slugs.  
+ 
+  
+12. Complete Request Flows  
+ 
+Flow A: Creating a Clip  
+This is what happens from the moment a user types their content and hits Create & Share.  
+ 
+1 User types content in the React textarea at pastit.site/myslug. Browser runs PBKDF2 
+on the password with 310,000 iterations to derive a key. Browser runs AES -256-
+GCM encryption on the content. All of this happens in JavaScript — nothing has left 
+the browse r yet.  
+2 Browser sends POST /api/clip with: slug, encrypted blob (base64), password hash 
+(not the password), expiry setting, flags (burn -after-read, max views, etc.), integrity 
+hash (SHA -256 of the encrypted blob).  
+3 Request hits Route 53 DNS, resolves to CloudFront. WAF inspects it. Clean, so it 
+passes through.  
+4 CloudFront sees /api/* path, forwards to API Gateway origin. API Gateway maps 
+POST /api/clip to Lambda create. Invokes it with the full request.  
+5 Lambda create: checks DynamoDB that slug is available. Puts encrypted blob to S3 
+at clips/myslug. Writes DynamoDB record with all metadata. Returns {url: 
+'pastit.site/myslug', qrCode: '...'} to the browser.  
+6 Browser shows the shareable link and QR code. Done. Server never saw plaintext.  
+ 
+Flow B: Viewing a Clip (Password -Protected)  
+This is what happens when a recipient opens a shared link.  
+ 
+1 Recipient visits pastit.site/myslug in their browser.  
+2 CloudFront serves index.html from S3 (the React app). React boots, reads /myslug 
+from the URL.  
+3 React sends GET /api/clip/myslug — metadata only. Lambda view reads 
+DynamoDB, returns: content type, expiry timestamp, password required: true, 
+locked: false, views remaining. No blob yet.  
+4 React shows the password entry screen with the countdown timer. Recipient types 
+the password.  
+5 Browser hashes the password locally. Sends POST /api/clip/myslug/unlock with the 
+hash.  
+6 Lambda view: checks wrong attempt count in DynamoDB. Under 5. Compares 
+submitted hash against stored hash. Match. Fetches encrypted blob from S3. 
+Increments view count atomically. If burn -after-read, deletes DynamoDB record and 
+S3 object. Returns encrypted  blob to browser.  
+7 Browser receives encrypted blob. Runs AES -256-GCM decryption with the user's 
+password. Plaintext appears on screen. Decryption happened entirely in the browser 
+— no plaintext ever on a wire.  
+ 
+Flow C: Wrong Password + Lockout  
+1 Recipient submits wrong password. Lambda checks attempt count: currently 2.  
+2 Lambda does conditional atomic increment on DynamoDB: wrongAttempts = 
+wrongAttempts + 1 IF wrongAttempts < 5. Success. New value: 3. Returns: wrong 
+password, 2 attempts remaining.  
+3 React shows the error with attempts remaining count.  
+4 At 5th wrong attempt, Lambda increments to 5. Returns locked. React shows the 
+lock screen — no more input accepted. No further Lambda calls can unlock this clip.  
+ 
+  
+13. React Frontend Architecture  
+The frontend is a standard React app. It reads the URL to determine what to render. There are 
+no page reloads — everything is a single page with React Router managing views.  
+ 
+URL-Driven Routing  
+URL What React Renders  
+pastit.site  Landing page — hero, features, how it works  
+pastit.site/:slug 
+(slug is free)  Creation workspace — textarea, file upload, encryption panel, advanced 
+options  
+pastit.site/:slug 
+(slug is taken)  View screen — password prompt if encrypted, or content directly if not  
+ 
+Creation Workspace Components  
+• Slug availability indicator — debounced GET to /api/slug -check/{slug} as user types, 
+green/red dot updates in real time  
+• Text/File toggle — switches between textarea and drag -drop file zone  
+• Encryption panel — password input with strength meter, confirm field, AES -256 badge  
+• Advanced options — expiry picker, burn after read toggle, max views input  
+• Create button — triggers browser -side encryption then POST to /api/clip  
+ 
+View Screen Components  
+• Metadata fetch on load — GET /api/clip/{slug} for expiry, type, lock status  
+• Countdown timer — live updating from the expiry timestamp  
+• Password card — input, submit, shows attempts remaining on failure  
+• Lock screen — replaces everything when wrongAttempts reaches 5  
+• Content display — text in a card with copy button, files with download button  
+ 
+  
+14. Encryption — How It Works  
+This is the core feature that makes pastit.site genuinely different. Everything runs in the browser 
+using the Web Crypto API — a native browser cryptography library that is fast, secure, and 
+requires no dependencies.  
+ 
+Step 1: Key Derivation (PBKDF2)  
+The user's password is a string. You cannot use a string directly as a cryptographic key. 
+PBKDF2 (Password -Based Key Derivation Function 2) stretches and hashes it into a proper 
+256-bit key.  
+ 
+Parameters: 310,000 iterations, SHA -256 hash, random 16 -byte salt. The salt is stored 
+alongside the encrypted blob so the recipient's browser can derive the same key with the same 
+password. The 310,000 iterations means a brute -force attack takes 310,000x l onger than a 
+simple hash — making offline cracking practically impossible for any reasonably strong 
+password.  
+ 
+Step 2: Encryption (AES -256-GCM)  
+AES-256-GCM is authenticated encryption. It does two things simultaneously: encrypts the 
+content so it cannot be read, and produces an authentication tag that detects any tampering. If 
+even one bit of the encrypted blob is changed, decryption fails with an  authentication error.  
+ 
+A random 12 -byte IV (Initialization Vector) is generated fresh for every clip. Same password, 
+different IV, completely different ciphertext — so two users with the same password produce 
+unrelated blobs.  
+ 
+What Gets Sent to the Server  
+Data Example / Format  
+Salt 16 random bytes, base64 encoded  
+IV 12 random bytes, base64 encoded  
+Encrypted blob  AES-GCM ciphertext + 16 -byte auth tag, base64 encoded  
+Password hash  Bcrypt of the password for server -side door check  
+Integrity hash  SHA-256 of the entire encrypted blob for tamper detection  
+ 
+The server stores salt, IV, and encrypted blob together. When the recipient decrypts, the 
+browser fetches all three, re -derives the key using the recipient's password + the salt, and 
+attempts AES -GCM decryption with the IV. If the password is wrong, decryp tion fails 
+cryptographically. Nothing is guessable or brutable from the ciphertext alone.  
+ 
+  
+15. Cost Breakdown  
+This is why serverless is perfect for your use case. At low traffic the cost is almost nothing. It 
+scales automatically with usage and you never pay for idle capacity.  
+ 
+Service  Monthly Cost at Early Stage  
+Route 53  $0.50 per hosted zone  
+ACM  Free 
+CloudFront  Free tier covers first 1TB/month and 10M requests  
+S3 (React app)  Free tier covers first 5GB  
+S3 (Content)  Minimal — depends on clip volume and size  
+API Gateway  Free tier covers first 1M requests/month  
+Lambda  Free tier covers first 1M invocations/month  
+DynamoDB  Free tier covers 25GB storage and 200M requests/month  
+EventBridge  Free — 720 invocations/month is negligible  
+WAF  $5.00/month fixed + usage  
+TOTAL  ~$5.50/month until significant traffic  
+ 
+WAF at $5/month is your dominant cost at early stage. Everything else is effectively free until 
+you reach meaningful scale. As traffic grows, CloudFront and Lambda costs scale gracefully — 
+you pay for what you use, nothing more.  
+ 
+  
+16. Deployment Order  
+Deploy in this exact order. Each step depends on the previous one.  
+ 
+1 Create Route 53 Hosted Zone. Get the 4 nameservers. Update GoDaddy. Wait 24 -
+48 hours.  
+2 Request ACM Certificate in us -east-1. Add the CNAME validation record to Route 
+53. Wait ~5 minutes for AWS to issue it.  
+3 Create S3 bucket for React app. Enable static website hosting. Block all public 
+access.  
+4 Create S3 bucket for encrypted content. Block all public access. Set up lifecycle rule 
+for 35 -day auto -delete.  
+5 Create DynamoDB table. Partition key: slug (String). Enable TTL on the expiresAt 
+attribute.  
+6 Create IAM role for Lambda. Grant: S3 read/write on content bucket, DynamoDB 
+read/write on clips table, CloudWatch Logs write.  
+7 Create Lambda functions (create, view, cleanup, slug -check). Attach the IAM role. 
+Set environment variables: CONTENT_BUCKET name, TABLE_NAME.  
+8 Create API Gateway HTTP API. Add routes pointing to each Lambda. Configure 
+CORS.  
+9 Create EventBridge rule: rate(1 hour), target = cleanup Lambda.  
+10 Create CloudFront distribution. Origin 1: S3 bucket (with OAC). Origin 2: API 
+Gateway. Path /api/* → API Gateway. All other paths → S3. Custom error: 403/404 
+→ index.html 200.  
+11 Attach WAF to CloudFront distribution. Enable AWS Managed Rules Common Rule 
+Set. 
+12 Add ALIAS record in Route 53: pastit.site → CloudFront domain name.  
+13 Build React app (npm run build). Sync to S3. Invalidate CloudFront cache.  
+14 Test end to end: create a clip, copy link, open in incognito, enter password, verify 
+content appears.  
+ 
+  
+17. Environment Variables & Config  
+Your Lambda functions need to know which S3 bucket and DynamoDB table to use. Set these 
+as environment variables in the Lambda configuration.  
+ 
+Variable  Value  
+CONTENT_BUCKET  your-pastit -content -bucket -name  
+CLIPS_TABLE  pastit -clips 
+ALLOWED_ORIGIN  https://pastit.site  
+MAX_FILE_SIZE_MB  50 
+DEFAULT_EXPIRY_DAYS  7 
+ 
+Your React app needs to know where the API is. Set this as a build -time environment variable:  
+ 
+Variable  Value  
+REACT_APP_API_URL  https://pastit.site/api  
+ 
+CloudFront routes /api/* to API Gateway, so your frontend just calls /api/* and CloudFront 
+handles the routing. No hardcoded API Gateway URLs in your frontend code.  
+ 
+  
+18. Summary — Why This Stack  
+Every choice in this architecture serves the same goal: zero operational overhead, zero trust 
+required, zero cost at early stage.  
+ 
+• Serverless (Lambda + API Gateway) — no servers to patch, manage, or pay for when 
+idle 
+• S3 + CloudFront — globally fast static delivery for the React app with no infrastructure  
+• DynamoDB — TTL handles expiry automatically, atomic operations prevent race 
+conditions  
+• Browser -side encryption — the server is structurally incapable of reading user content  
+• WAF — attack protection with zero maintenance, managed rule sets updated by AWS  
+• Route 53 + ACM — DNS and HTTPS fully managed, auto -renewing, integrated with 
+everything  
+ 
+The entire system from a user hitting pastit.site/myslug to seeing decrypted content involves: 
+Route 53 (DNS, <1ms), CloudFront (edge delivery, global), WAF (security check, <1ms), API 
+Gateway (routing, <1ms), Lambda (business logic, <50ms), DynamoDB (meta data read, <5ms), 
+S3 (blob read, <20ms), browser decryption (<100ms). Total: well under 200ms for most users 
+worldwide.  
+ 
+pastit.site — Built on AWS, owned by no one, readable by no one.  
+
+
+=== BUILD GUIDE ===
+pastit.site  
+Complete Build Guide — Zero to Live  
+Step-by-step guide with exact AI prompts for every phase  
+ 
+HOW TO USE THIS GUIDE: Each phase is independent. Do every step in order. The AI prompts 
+are copy -paste ready — use them in Claude, ChatGPT, or Cursor. Never skip a phase; each 
+one depends on the last.  
+ 
+The 7 Phases at a Glance  
+Phase  What You Will Build  
+Phase 1 — AWS Setup  Route 53, ACM certificate, S3 buckets, DynamoDB, IAM roles  
+Phase 2 — Backend 
+(Lambda)  All 5 Lambda functions: create, view, unlock, slug -check, cleanup  
+Phase 3 — API Gateway  HTTP API that connects URLs to your Lambda functions  
+Phase 4 — Frontend UI  React app with all screens: landing, create, view, locked states  
+Phase 5 — CloudFront + 
+WAF CDN, HTTPS, firewall — wire everything together  
+Phase 6 — DNS Point pastit.site from GoDaddy to Route 53, go live  
+Phase 7 — Testing  End-to-end test checklist before you share with anyone  
+ 
+IMPORTANT CORRECTION FROM YOUR ORIGINAL PLAN: The UI should allow text AND file 
+input at the same time (not toggle). Encryption should be a toggle ON/OFF. This guide reflects 
+those changes throughout.  
+  
+PHASE 1  
+AWS Setup  
+Domain → Route 53 | SSL Certificate | S3 | DynamoDB | IAM  
+ 
+1A. Move Your Domain from GoDaddy to Route 53  
+Your domain stays registered at GoDaddy. You are only moving DNS control to AWS Route 53. This 
+takes 24 -48 hours.  
+ 
+Step 1: Create a Hosted Zone in Route 53  
+→ Go to AWS Console → Route 53 → Hosted Zones → Create Hosted Zone  
+→ Domain name: pastit.site  
+→ Type: Public Hosted Zone  
+→ Click Create Hosted Zone  
+ 
+Step 2: Copy the 4 Nameservers AWS gives you  
+→ After creation you see a record type NS with 4 values like: ns -123.awsdns -45.com  
+→ Copy ALL 4 of them — you need them for GoDaddy  
+ 
+Step 3: Update GoDaddy to use AWS nameservers  
+→ Log in to GoDaddy → My Domains → pastit.site → DNS → Manage DNS  
+→ Scroll to Nameservers → Click Change → Choose Custom  
+→ Delete GoDaddy's default nameservers  
+→ Paste all 4 AWS nameservers one by one → Save  
+→ Wait 24 –48 hours for DNS propagation worldwide  
+ 
+After you save in GoDaddy, do NOT touch DNS again until propagation is done. You can check 
+progress at whatsmydns.net — search your domain and see green ticks appear globally.  
+ 
+1B. SSL Certificate via ACM  
+This gives you free HTTPS. It must be created in us -east-1 (US East, N. Virginia) even if you use 
+another region.  
+ 
+Step 1: Request Certificate  
+→ AWS Console → top -right region selector → change to US East (N. Virginia) — us-east-1 
+→ Go to Certificate Manager → Request → Request a public certificate  
+→ Domain names: add pastit.site and *.pastit.site (the * covers all subdomains)  
+→ Validation method: DNS validation → Request  
+ 
+Step 2: Validate Ownership  
+→ After requesting, click into the certificate — it shows Pending validation  
+→ You see a CNAME name and CNAME value — click 'Create records in Route 53'  
+→ AWS automatically adds the CNAME to your Route 53 hosted zone  
+→ Wait 5 –10 minutes — certificate status changes to Issued  
+→ Copy the certificate ARN (looks like arn:aws:acm:us -east-1:...) — you need it later  
+ 
+1C. Create S3 Buckets  
+You need TWO separate S3 buckets. One for the React app files. One for encrypted user content.  
+ 
+Step 1: React App Bucket  
+→ AWS Console → S3 → Create bucket  
+→ Bucket name: pastit -site-frontend (or any unique name)  
+→ Region: us -east-1 
+→ Block all public access: KEEP THIS ON (CloudFront will access it privately)  
+→ Click Create bucket  
+→ Note: Do NOT enable static website hosting — CloudFront handles delivery  
+ 
+Step 2: Encrypted Content Bucket  
+→ S3 → Create bucket  
+→ Bucket name: pastit -site-content (must be globally unique — add random suffix if needed)  
+→ Region: us -east-1 
+→ Block all public access: KEEP THIS ON  
+→ Click Create bucket  
+→ After creating: go into bucket → Management → Create lifecycle rule  
+→ Rule name: auto -delete -old → Apply to all objects → Expire current versions after 35 days → 
+Save 
+ 
+1D. Create DynamoDB Table  
+Step 1: Create the Table  
+→ AWS Console → DynamoDB → Create table  
+→ Table name: pastit -clips 
+→ Partition key: slug (type String)  
+→ Leave sort key empty  
+→ Table settings: Customize → Capacity mode: On -demand  
+→ Click Create table  
+ 
+Step 2: Enable TTL (Auto -Expiry)  
+→ Click into the pastit -clips table → Additional settings tab  
+→ Scroll to Time to live (TTL) → Click Enable  
+→ TTL attribute name: expiresAt → Enable TTL  
+→ This makes DynamoDB automatically delete clips when they expire  
+ 
+1E. Create IAM Role for Lambda  
+This gives your Lambda functions permission to read/write S3 and DynamoDB.  
+ 
+Step 1: Create the Role  
+→ AWS Console → IAM → Roles → Create role  
+→ Trusted entity type: AWS service  
+→ Use case: Lambda → Next  
+→ Search and add these policies: AmazonDynamoDBFullAccess, AmazonS3FullAccess, 
+AWSLambdaBasicExecutionRole  
+→ Role name: pastit -lambda -role → Create role  
+→ Note: For production later, narrow these permissions. For launch, this works.  
+ 
+  
+PHASE 2  
+Backend — Lambda Functions  
+5 functions that power everything. Use AI to generate each one.  
+ 
+You will create 5 Lambda functions. For each one: go to AWS Console → Lambda → Create function. 
+Runtime: Node.js 20.x. Execution role: Use existing role → pastit -lambda -role. 
+ 
+HOW TO USE THE PROMPTS BELOW: Copy the entire prompt. Paste it into Claude (claude.ai) 
+or ChatGPT. It will give you complete code. Create the Lambda function in AWS console, paste 
+the code in, then set the environment variables listed.  
+ 
+Lambda 1: create — Saves a New Clip  
+Function name: pastit -create | Timeout: 10 seconds | Memory: 256 MB  
+ 
+AI Prompt to Generate This Function:  
+Write a complete AWS Lambda function in Node.js 20 called "create" for 
+pastit.site.  
+ 
+Environment variables available: CONTENT_BUCKET, CLIPS_TABLE, ALLOWED_ORIGIN  
+ 
+This function handles POST /api/clip requests.  
+ 
+Request body JSON fields:  
+- slug (string): the URL slug chosen by user  
+- encryptedBlob (string): base64 encoded AES -256-GCM encrypted content (may be 
+absent if no encryption)  
+- plainBlob (string): base64 encoded plain content (present when encryption is 
+OFF) 
+- passwordHash (string or null): bcrypt hash of the password (null if no 
+encryption)  
+- salt (string or null): 16 -byte base64 salt used in PBKDF2 (null if no 
+encryption)  
+- iv (string or null): 12 -byte base64 IV used in AES -GCM (null if no encryption)  
+- integrityHash (string): SHA -256 of the blob for tamper detection  
+- contentType (string): "text" or "file"  
+- fileName (string or null): original filename if contentType is "file"  
+- expiryDays (number): 1, 7, or 30  
+- maxViews (number or null): maximum view count, null means unlimited  
+- burnAfterRead (boolean): delete after first successful view  
+ 
+What the function must do:  
+1. Check DynamoDB that the slug does not already exist (if it exists and not 
+expired, return 409 conflict)  
+2. Put the blob (encryptedBlob OR plainBlob) to S3 at key clips/{slug}  
+3. Write DynamoDB record with all fields: slug, passwordHash, salt, iv, 
+contentType, fileName,  
+   expiresAt (Unix timestamp = now + expiryDays * 86400), maxViews, viewCount: 0,  
+   wrongAttempts: 0, burnAfterRead, s3Key: clips/{slug}, integrityHash, createdAt 
+ISO string,  
+   isEncrypted (boolean, true if passwordHash is not null)  
+4. Return 200 JSON: { success: true, url: "https://pastit.site/" + slug }  
+ 
+Return proper CORS headers with ALLOWED_ORIGIN.  
+Handle all errors with proper HTTP status codes and JSON error messages.  
+Use AWS SDK v3 (@aws -sdk/client -s3 and @aws -sdk/client -dynamodb and @aws -sdk/lib-
+dynamodb).  
+ 
+After pasting the code, set these Environment Variables:  
+Variable Name  Value (replace with your actual names)  
+CONTENT_BUCKET  pastit -site-content  
+CLIPS_TABLE  pastit -clips 
+ALLOWED_ORIGIN  https://pastit.site  
+ 
+Lambda 2: view — Returns Clip Metadata  
+Function name: pastit -view | Timeout: 10 seconds | Memory: 256 MB  
+ 
+AI Prompt to Generate This Function:  
+Write a complete AWS Lambda function in Node.js 20 called "view" for pastit.site.  
+ 
+Environment variables: CONTENT_BUCKET, CLIPS_TABLE, ALLOWED_ORIGIN  
+ 
+This function handles GET /api/clip/{slug} requests.  
+The slug comes from event.pathParameters.slug  
+ 
+What it must do:  
+1. Read the DynamoDB record for this slug  
+2. If not found, return 404 JSON: { error: "not found" }  
+3. If found but expiresAt is in the past, return 404 JSON: { error: "expired" }  
+4. Return 200 JSON with ONLY metadata (never the blob): {  
+     contentType, fileName, expiresAt, requiresPassword (true if isEncrypted),  
+     isLocked (true if wrongAttempts >= 5),  
+     viewCount, maxViews, burnAfterRead, isEncrypted  
+   } 
+ 
+Do NOT return the S3 blob in this call.  
+Return proper CORS headers.  
+Use AWS SDK v3.  
+ 
+Lambda 3: unlock — Verifies Password, Returns Blob  
+Function name: pastit -unlock | Timeout: 15 seconds | Memory: 256 MB  
+ 
+AI Prompt to Generate This Function:  
+Write a complete AWS Lambda function in Node.js 20 called "unlock" for 
+pastit.site.  
+ 
+Environment variables: CONTENT_BUCKET, CLIPS_TABLE, ALLOWED_ORIGIN  
+ 
+This function handles POST /api/clip/{slug}/unlock  
+Request body: { passwordHash: string } — OR empty body if clip is not encrypted  
+ 
+What it must do:  
+1. Read DynamoDB record for slug. Return 404 if not found or expired.  
+2. If wrongAttempts >= 5, return 423 JSON: { error: "locked", message: "This clip 
+is locked due to too many wrong attempts" }  
+3. If isEncrypted is true:  
+   a. Compare submitted passwordHash with stored passwordHash  
+   b. If wrong: atomically increment wrongAttempts in DynamoDB using 
+ConditionExpression  
+      (wrongAttempts < 5). Return 401 JSON: { error: "wrong_password", 
+attemptsRemaining: 5 - newCount }  
+   c. If correct: proceed to step 4  
+4. If isEncrypted is false: proceed directly to step 4  
+5. Fetch blob from S3 at record.s3Key  
+6. Atomically increment viewCount in DynamoDB  
+7. If burnAfterRead is true: delete DynamoDB record AND delete S3 object  
+8. Else if maxViews is set and viewCount >= maxViews: delete DynamoDB record and 
+S3 object  
+9. Return 200 JSON: {  
+     blob: <base64 string from S3>,  
+     salt: record.salt,  
+     iv: record.iv,  
+     isEncrypted: record.isEncrypted,  
+     contentType: record.contentType,  
+     fileName: record.fileName,  
+     integrityHash: record.integrityHash  
+   } 
+ 
+Return proper CORS headers. Use AWS SDK v3.  
+Use bcryptjs (NOT bcrypt native) for password hash comparison.  
+Install bcryptjs by including it in package.json, or use a simple SHA -256 
+comparison  
+if the frontend sends pre -hashed values — note which approach you use.  
+ 
+PASSWORD APPROACH: The frontend will hash the password with SHA -256 before sending. 
+The Lambda stores this hash and compares it. Real bcrypt is not needed because the 
+encryption key uses PBKDF2 — the hash is just a door check, not the encryption key.  
+ 
+Lambda 4: slug -check — Real -time Availability  
+Function name: pastit -slugcheck | Timeout: 5 seconds | Memory: 128 MB  
+ 
+AI Prompt to Generate This Function:  
+Write a complete AWS Lambda function in Node.js 20 called "slug -check" for 
+pastit.site.  
+ 
+Environment variables: CLIPS_TABLE, ALLOWED_ORIGIN  
+ 
+This function handles GET /api/slug -check/{slug}  
+The slug comes from event.pathParameters.slug  
+ 
+What it must do:  
+1. Read DynamoDB for this slug  
+2. If not found: return 200 JSON { available: true }  
+3. If found but expiresAt is past current time: return 200 JSON { available: true 
+} 
+4. If found and not expired: return 200 JSON { available: false }  
+ 
+Must respond in under 100ms — use a simple GetItem call only.  
+Return proper CORS headers. Use AWS SDK v3.  
+ 
+Lambda 5: cleanup — Hourly Orphan S3 Cleaner  
+Function name: pastit -cleanup | Timeout: 60 seconds | Memory: 256 MB  
+ 
+AI Prompt to Generate This Function:  
+Write a complete AWS Lambda function in Node.js 20 called "cleanup" for 
+pastit.site.  
+This is triggered by EventBridge on a schedule, not by HTTP.  
+ 
+Environment variables: CONTENT_BUCKET, CLIPS_TABLE  
+ 
+What it must do:  
+1. List all objects in S3 under the prefix "clips/"  
+2. For each S3 object key (e.g. clips/myslug), extract the slug  
+3. Do a DynamoDB GetItem for that slug  
+4. If the DynamoDB record does not exist OR expiresAt is in the past:  
+   → Delete the S3 object  
+5. Log how many objects were checked and how many were deleted  
+6. Return { cleaned: N } where N is count of deleted objects  
+ 
+Use AWS SDK v3. Handle pagination if S3 has more than 1000 objects (use 
+ContinuationToken).  
+ 
+  
+PHASE 3  
+API Gateway  
+Connect HTTP URLs to your Lambda functions  
+ 
+API Gateway is the bridge between the internet and your Lambda functions. You create one HTTP API 
+with 5 routes.  
+ 
+Step 1: Create the HTTP API  
+→ AWS Console → API Gateway → Create API → HTTP API → Build  
+→ API name: pastit -api 
+→ Click Next on integrations (you will add them after)  
+→ Click Next through stages (leave $default)  
+→ Click Create  
+ 
+Step 2: Add All 5 Routes with Lambda Integrations  
+→ In your API → Routes → Create  
+→ Create each route below one by one, each pointing to its Lambda function  
+ 
+Route (Method + Path)  Lambda Function to Connect  
+POST /api/clip  pastit -create  
+GET /api/clip/{slug}  pastit -view 
+POST /api/clip/{slug}/unlock  pastit -unlock  
+DELETE /api/clip/{slug}  pastit -unlock (handles delete too — or create separate)  
+GET /api/slug -check/{slug}  pastit -slugcheck  
+ 
+For each route: click the route → Attach integration → Create and attach → Lambda → choose the 
+function.  
+ 
+Step 3: Configure CORS  
+→ In your API → CORS → Configure  
+→ Access -Control -Allow -Origin: https://pastit.site  
+→ Access -Control -Allow -Methods: GET, POST, DELETE, OPTIONS  
+→ Access -Control -Allow -Headers: Content -Type, Authorization  
+→ Save 
+ 
+Step 4: Copy Your API Endpoint URL  
+→ Go to API → your $default stage  
+→ Copy the invoke URL — looks like: https://abc123.execute -api.us -east-1.amazonaws.com  
+→ Save this — you need it when setting up CloudFront  
+ 
+Step 5: Create EventBridge Rule for Cleanup  
+→ AWS Console → EventBridge → Rules → Create rule  
+→ Name: pastit -hourly -cleanup  
+→ Rule type: Schedule → rate(1 hour)  
+→ Target: Lambda → pastit -cleanup  
+→ Save 
+ 
+  
+PHASE 4  
+Frontend — React UI  
+Landing page, Create screen, View screen, all states  
+ 
+You will build the React app locally on your computer, then upload the built files to S3. You 
+need Node.js installed. Download from nodejs.org if you don't have it.  
+ 
+4A. Create the React Project  
+Open your terminal (Command Prompt on Windows, Terminal on Mac) and run:  
+npx create -react-app pastit -frontend  
+cd pastit -frontend  
+npm install react -router-dom axios  
+ 
+4B. Environment Config  
+Create a file called .env in the root of your project (same folder as package.json):  
+REACT_APP_API_URL=https://pastit.site/api  
+ 
+Do not put your real API Gateway URL here. CloudFront will route /api/* to your API Gateway. 
+Your frontend always calls /api/* and CloudFront handles the rest.  
+ 
+4C. Generate the Full App with AI  
+This is the big one. Use this prompt to generate your complete React application:  
+ 
+MAIN UI PROMPT — Paste this into Claude or ChatGPT:  
+Build a complete React application for pastit.site — a zero-knowledge encrypted 
+clipboard.  
+ 
+TECH STACK: React 18, React Router v6, plain CSS (no Tailwind), no UI libraries,  
+use fetch() for API calls (not axios).  
+ 
+API_BASE is process.env.REACT_APP_API_URL (e.g. https://pastit.site/api)  
+ 
+=== ROUTING ===  
+Use React Router. All routes render the same domain pastit.site/:slug  
+- pastit.site → LandingPage component  
+- pastit.site/:slug → SlugPage component (handles both create and view states)  
+ 
+=== LANDING PAGE (pastit.site) ===  
+A beautiful dark -themed landing page with:  
+- Hero section: "Share anything. Privately." tagline  
+- Brief feature list: encrypted, self -destructing, zero -knowledge  
+- A big CTA button: "Create a clip" that navigates to pastit.site/start or lets 
+user type a slug  
+ 
+=== SLUG PAGE — CREATE MODE (slug is available) ===  
+When user visits pastit.site/:slug and the slug is available, show creation 
+workspace:  
+ 
+1. SLUG BAR at top:  
+   - Shows current slug with edit icon  
+   - Real-time availability dot (green = available, red = taken)  
+   - Debounce API call to GET /api/slug -check/{slug} 500ms after typing stops  
+   - If user types a new slug, update the URL with React Router (no page reload)  
+ 
+2. CONTENT AREA — BOTH inputs visible at same time (NOT a toggle):  
+   a. TEXT AREA: Large textarea "Type or paste your text here..."  
+   b. FILE ZONE below it: Drag -and-drop area "Drop files here or click to browse"  
+      - Accept any file up to 50MB  
+      - Show file name and size after selection with X to remove  
+      - User can have BOTH text and a file at the same time  
+ 
+3. ENCRYPTION TOGGLE (single toggle switch, default OFF):  
+   - Label: "Encrypt this clip"  
+   - When OFF: content is sent as -is, no password needed  
+   - When ON: show password input field with strength indicator  
+     (strength: weak/medium/strong based on length and character variety)  
+   - Show AES -256 badge when ON  
+ 
+4. OPTIONS ROW:  
+   - Expiry selector: 1 day / 7 days / 30 days (default 7)  
+   - Burn after read toggle (default OFF)  
+   - Max views input (optional, leave blank for unlimited)  
+ 
+5. CREATE BUTTON: "Create & Share"  
+   - When clicked and encryption is ON:  
+     * Derive 256 -bit key using PBKDF2:  
+       crypto.subtle.importKey then crypto.subtle.deriveBits  
+       310,000 iterations, SHA -256, random 16 -byte salt  
+     * Encrypt text (and file if present) with AES -256-GCM, random 12 -byte IV  
+     * Hash password with SHA -256 for server -side door check  
+     * Send POST /api/clip with: slug, encryptedBlob (base64), passwordHash, salt 
+(base64),  
+       iv (base64), integrityHash (SHA -256 of blob), contentType, fileName,  
+       expiryDays, maxViews, burnAfterRead, isEncrypted: true  
+   - When clicked and encryption is OFF:  
+     * Send content as plain base64  
+     * POST /api/clip with: slug, plainBlob (base64), contentType, fileName,  
+       expiryDays, maxViews, burnAfterRead, isEncrypted: false, passwordHash: null  
+   - On success: show SUCCESS SCREEN with shareable URL + copy button + QR code  
+     (generate QR using qrcode library: npm install qrcode)  
+ 
+=== SLUG PAGE — VIEW MODE (slug is taken) ===  
+When GET /api/clip/{slug} returns data, determine state and show:  
+ 
+STATE 1 — NOT ENCRYPTED, content available:  
+- Fetch blob via POST /api/clip/{slug}/unlock (empty body)  
+- If contentType is "text": decode base64, show in styled text box with copy 
+button  
+- If contentType is "file": show filename + download button (create blob URL and 
+trigger download)  
+- Show expiry countdown timer (live, updates every second)  
+ 
+STATE 2 — ENCRYPTED, needs password:  
+- Show password input card  
+- Countdown timer at top  
+- On submit: hash password with SHA -256, POST /api/clip/{slug}/unlock with { 
+passwordHash }  
+- On success: decode blob with AES -GCM (use salt and iv from response), show 
+content  
+- On failure: show "Wrong password — X attempts remaining"  
+- Decryption in browser using Web Crypto API (subtle.decrypt)  
+ 
+STATE 3 — LOCKED (wrongAttempts >= 5):  
+- Replace everything with lock screen  
+- Icon + "This clip has been locked due to too many failed attempts"  
+- No input, no button  
+ 
+STATE 4 — NOT FOUND or EXPIRED:  
+- Clean not -found screen  
+- If slug is available: show "This clip doesn't exist — want to create one?" + 
+redirect to create mode  
+ 
+=== DESIGN ===  
+Dark theme. Background: #0D1117. Cards: #161B22. Accent: #58A6FF (blue).  
+Success green: #3FB950. Error red: #F85149.  
+Clean, minimal, no clutter. Mobile responsive.  
+Smooth transitions between states.  
+ 
+=== ENCRYPTION IMPLEMENTATION ===  
+Use Web Crypto API (window.crypto.subtle) — no external libraries for crypto.  
+PBKDF2 → AES -256-GCM for encryption.  
+SHA-256 for password door -check hash (not the encryption key).  
+ 
+=== FILE STRUCTURE ===  
+src/ 
+  App.js — Router setup  
+  pages/LandingPage.js  
+  pages/SlugPage.js  
+  components/SlugBar.js  
+  components/ContentArea.js — text + file inputs  
+  components/EncryptionToggle.js  
+  components/OptionsRow.js  
+  components/SuccessScreen.js  
+  components/ViewScreen.js — handles all view states  
+  components/PasswordCard.js  
+  components/LockScreen.js  
+  components/CountdownTimer.js  
+  utils/crypto.js — all encryption/decryption functions  
+  utils/api.js — all fetch calls  
+  App.css — global dark theme styles  
+ 
+Give me ALL files completely. Do not use placeholder comments like "// add code 
+here".  
+Every file must be complete and functional.  
+ 
+This prompt is long but necessary. Claude or ChatGPT will generate all the files. If it cuts off, 
+say: 'Continue from where you left off — give me the remaining files.' Copy each file into your 
+project exactly as given.  
+ 
+4D. Build and Upload to S3  
+# In your terminal, inside the pastit -frontend folder:  
+npm run build  
+ 
+# After build finishes, upload to S3 (requires AWS CLI — install from 
+aws.amazon.com/cli):  
+aws configure   # enter your AWS access key, secret, region us -east-1 
+ 
+aws s3 sync ./build s3://pastit -site-frontend --delete  
+ 
+  
+PHASE 5  
+CloudFront + WAF  
+Global CDN, HTTPS, Security — wire everything together  
+ 
+5A. Create CloudFront Distribution  
+Step 1: Start the Distribution  
+→ AWS Console → CloudFront → Create distribution  
+→ Origin domain: DO NOT use the S3 website endpoint — use the S3 bucket domain  
+→ Click into the origin domain field and select your pastit -site-frontend bucket from the dropdown  
+→ Origin access: Origin access control settings (recommended)  
+→ Click 'Create new OAC' → name it pastit -oac → Create  
+→ A banner will appear: 'Copy policy' — click it and keep it handy  
+ 
+Step 2: Add API Gateway as Second Origin  
+→ Scroll to Origins section → Add origin  
+→ Origin domain: paste your API Gateway invoke URL (from Phase 3 Step 4)  
+→ Remove the https:// prefix and trailing slash — just the domain  
+→ Protocol: HTTPS only  
+→ Origin name: pastit -api 
+→ Save 
+ 
+Step 3: Configure Behaviors  
+→ Default behavior (already created): points to S3 — leave it  
+→ Create behavior → Path pattern: /api/*  
+→ Origin: pastit -api (your API Gateway origin)  
+→ Cache policy: CachingDisabled  
+→ Origin request policy: AllViewerExceptHostHeader  
+→ Allowed HTTP methods: GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE  
+→ Save 
+ 
+Step 4: Configure SPA Routing (Critical!)  
+→ Error pages tab → Create custom error response  
+→ HTTP error code: 403 → Customize → Response page path: /index.html → HTTP response 
+code: 200  
+→ Create another: HTTP error code: 404 → same settings  
+→ This makes React Router work for direct URL access like pastit.site/myslug  
+ 
+Step 5: Add SSL Certificate and Domain  
+→ Settings section → Alternate domain name (CNAME): add pastit.site and www.pastit.site  
+→ Custom SSL certificate: choose the ACM certificate you created in Phase 1  
+→ Default root object: index.html  
+→ Click Create distribution  
+→ Wait 10 –15 minutes for deployment (status changes from In Progress to Deployed)  
+ 
+Step 6: Apply the S3 Bucket Policy  
+→ Go to S3 → pastit -site-frontend bucket → Permissions tab  
+→ Bucket policy → Edit  
+→ Paste the policy you copied from the CloudFront OAC banner (from Step 1)  
+→ Save changes  
+→ This allows CloudFront to read your bucket  
+ 
+Copy your CloudFront domain name (looks like d1234abcde.cloudfront.net). You need it for the 
+next step.  
+ 
+5B. Set Up WAF  
+Step 1: Create WAF Web ACL  
+→ AWS Console → WAF & Shield → Web ACLs → Create web ACL  
+→ Region: Global (CloudFront)  
+→ Name: pastit -waf 
+→ Add rules → Add managed rule groups  
+→ Enable: AWS -AWSManagedRulesCommonRuleSet  
+→ Enable: AWS -AWSManagedRulesKnownBadInputsRuleSet  
+→ Default action: Allow  
+→ Next → Next → Associate it with your CloudFront distribution → Create  
+ 
+  
+PHASE 6  
+DNS — Go Live  
+Point pastit.site to CloudFront. Your site goes live.  
+ 
+This is the final connection. You already moved DNS to Route 53 in Phase 1. Now you add the record 
+pointing your domain to CloudFront.  
+ 
+Step 1: Create A Record in Route 53  
+→ AWS Console → Route 53 → Hosted Zones → pastit.site  
+→ Create record  
+→ Record name: leave blank (this is the root domain pastit.site)  
+→ Record type: A  
+→ Toggle on: Alias  
+→ Route traffic to: Alias to CloudFront distribution  
+→ Choose your CloudFront distribution from the dropdown  
+→ Click Create records  
+ 
+Step 2: Create www Record (optional but recommended)  
+→ Create record  
+→ Record name: www  
+→ Record type: CNAME  
+→ Value: your CloudFront domain (d1234abcde.cloudfront.net)  
+→ Create records  
+ 
+Step 3: Wait and Test  
+→ DNS changes propagate in 1 –5 minutes (since Route 53 already controls DNS)  
+→ Open your browser → visit https://pastit.site  
+→ You should see your landing page over HTTPS  
+ 
+  
+PHASE 7  
+Testing Checklist  
+Do every test before sharing with anyone  
+ 
+Test Every Scenario — In Order  
+Test Expected Result  
+Visit https://pastit.site  Landing page loads over HTTPS — padlock in browser  
+Visit https://pastit.site/test123  Create workspace loads, slug shows green dot (available)  
+Type a slug that is taken  Dot turns red immediately as you type  
+Create a clip WITHOUT encryption  Success screen shows. Copy the link.  
+Open the link in incognito  Content shows immediately, no password needed  
+Create a clip WITH encryption + 
+password  Success screen shows shareable link  
+Open encrypted link in incognito  Password prompt appears with countdown timer  
+Enter WRONG password 5 times  After 5th: lock screen appears, no more input  
+Enter CORRECT password  Content decrypts and displays in browser  
+Create clip with a file attached  File downloads correctly on the view screen  
+Create clip with text AND file  Both appear on view screen  
+Create clip with burn after read  After first view, link shows not found  
+Create clip with 1 -day expiry  expiresAt is set correctly (check in DynamoDB console)  
+Wait for a clip to expire (or set 
+expiresAt to past in DynamoDB)  Returns expired/not found  
+Open any direct URL 
+(pastit.site/myslug)  Page loads without 404 error  
+Open site on mobile browser  Responsive layout, usable on small screen  
+ 
+Common Errors and Fixes  
+Error You See  How to Fix It  
+CORS error in browser 
+console  Check API Gateway CORS settings — ALLOWED_ORIGIN must 
+match exactly including https://  
+403 Forbidden on pastit.site  S3 bucket policy not applied — redo Phase 5 Step 6  
+API calls return 502 or 503  Lambda function has an error — check Lambda → Monitor → 
+View logs in CloudWatch  
+Decryption failed in browser  Salt and IV not being returned correctly from unlock Lambda — 
+check the response fields  
+Slug shows taken when it 
+should be free  DynamoDB TTL hasn't deleted old record yet — manually delete in 
+DynamoDB console  
+Site loads but /api/* gives 404  CloudFront behavior for /api/* not configured — redo Phase 5 Step 
+3 
+Certificate error — not secure  ACM certificate not in us -east-1 — must be in that specific region 
+for CloudFront  
+File download doesn't work  Lambda returning file blob incorrectly — check that S3 GetObject 
+response is base64 encoded  
+QR code not showing  Run: npm install qrcode in your frontend folder, rebuild and 
+redeploy  
+ 
+  
+How Everything Connects — Quick Reference  
+ 
+When a user does this...  This is what happens behind the scenes  
+Visits pastit.site  GoDaddy → Route 53 → CloudFront → S3 → serves index.html  
+Types a slug  React → fetch GET /api/slug -check/slug → CloudFront → API GW 
+→ pastit -slugcheck Lambda → DynamoDB  
+Clicks Create & Share  Browser encrypts → fetch POST /api/clip → CloudFront → API 
+GW → pastit -create Lambda → DynamoDB + S3  
+Opens a shared link  React → fetch GET /api/clip/slug → Lambda → DynamoDB 
+(metadata only)  
+Enters password to unlock  Browser hashes pw → fetch POST /api/clip/slug/unlock → Lambda 
+→ DynamoDB verify → S3 fetch blob → browser decrypts  
+Clip expires  DynamoDB TTL auto -deletes record. EventBridge fires cleanup 
+Lambda hourly to delete orphaned S3 blobs.  
+ 
+Your Cheat Sheet — Things to Save  
+Item Where to Find It  
+Route 53 Nameservers (4 
+values)  Route 53 → Hosted Zones → pastit.site → NS record  
+ACM Certificate ARN  Certificate Manager → your certificate → ARN field  
+S3 Frontend Bucket Name  pastit -site-frontend (or what you named it)  
+S3 Content Bucket Name  pastit -site-content (or what you named it)  
+DynamoDB Table Name  pastit -clips 
+API Gateway Invoke URL  API Gateway → your API → $default stage → Invoke URL  
+CloudFront Distribution 
+Domain  CloudFront → your distribution → Distribution domain name  
+Lambda Role ARN  IAM → Roles → pastit -lambda -role → ARN  
+ 
+You are done! If anything breaks, the Common Errors table in Phase 7 covers the most likely 
+issues. For anything else, paste your error message into Claude or ChatGPT and it will help 
+you debug.  
+ 
+pastit.site — Built on AWS, owned by no one, readable by no one.  
